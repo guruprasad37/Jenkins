@@ -1,12 +1,78 @@
 pipeline {
-  agent {
-    docker { image 'node:16-alpine' }
-  }
-  stages {
-    stage('Test') {
-      steps {
-        sh 'node --version'
-      }
+    agent any
+
+    environment {
+        AWS_DEFAULT_REGION = "ap-south-1"
+        TF_VAR_env = "dev"
     }
-  }
+
+    stages {
+
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/guruprasad37/Jenkins/edit/main/jenkinsfile'
+            }
+        }
+
+        stage('Terraform Init') {
+            steps {
+                sh '''
+                cd terraform
+                terraform init -backend-config="bucket=my-tf-state-bucket" \
+                               -backend-config="key=${TF_VAR_env}/terraform.tfstate" \
+                               -backend-config="region=ap-south-1"
+                '''
+            }
+        }
+
+        stage('Terraform Plan') {
+            steps {
+                sh '''
+                cd terraform
+                terraform plan -var="environment=${TF_VAR_env}" -out=tfplan.out
+                '''
+            }
+        }
+
+        stage('Terraform Apply') {
+            steps {
+                input message: "Apply Terraform changes?"  // Manual approval step
+                sh '''
+                cd terraform
+                terraform apply -auto-approve tfplan.out
+                '''
+            }
+        }
+
+        stage('Build Application') {
+            steps {
+                sh '''
+                echo "Building application..."
+                # Example for Java
+                mvn clean package
+                '''
+            }
+        }
+
+        stage('Deploy Application') {
+            steps {
+                sh '''
+                echo "Deploying application..."
+                # Example: copy artifact to S3 or deploy to EC2
+                aws s3 cp target/app.jar s3://my-app-bucket/${TF_VAR_env}/
+                '''
+            }
+        }
+
+    }
+
+    post {
+        success {
+            echo "Pipeline completed successfully!"
+        }
+        failure {
+            echo "Pipeline failed. Check logs."
+        }
+    }
 }
